@@ -1,0 +1,8 @@
+# torch, torchvision and OpenCV come from the Jetson base image (GPU builds),
+# so they are intentionally not listed here.
+ultralytics>=8.3
+supervision>=0.25
+numpy
+pandas
+matplotlib
+streamlit

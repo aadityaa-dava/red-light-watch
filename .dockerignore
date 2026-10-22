@@ -1,0 +1,7 @@
+.git/
+__pycache__/
+.ipynb_checkpoints/
+data/clips/
+outputs/
+*.pt
+*.engine

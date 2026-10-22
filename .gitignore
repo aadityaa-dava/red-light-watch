@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+data/clips/*
+!data/clips/.gitkeep
+outputs/*
+!outputs/.gitkeep
+*.pt
+*.engine
+*.onnx
+.DS_Store
