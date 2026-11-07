@@ -2,7 +2,7 @@
 import csv
 import sys
 import time
-from collections import Counter
+from collections import Counter, deque
 from pathlib import Path
 
 import cv2
@@ -19,6 +19,12 @@ CONF_CONFIRM = 0.5            # below this, a crossing goes to NEEDS_REVIEW
 IMGSZ = 1280                  # larger input helps with small night-time cars
 GRACE_SECONDS = 1.0           # crossing this soon after red is a late entry
 HIGH_RISK_THRESHOLD = 3       # violations per clip that flag the intersection
+
+HIST_FRAMES = 8               # frames of motion used to check driving direction
+MIN_FORWARD = 4.0             # px a car must move toward the far side of the line
+MIN_COS = 0.5                 # motion must point within ~60 deg of the approach direction
+CONFIRM_SECONDS = 0.5         # car must stay beyond the line this long to be confirmed
+LOST_SECONDS = 1.5            # if the track vanishes after crossing, confirm after this
 
 COLORS = {  # BGR
     "VIOLATION": (0, 0, 255),
@@ -51,10 +57,23 @@ def side_of(p):
 
 APPROACH_SIDE = side_of(ref)  # cars start on this side and cross to the other
 
+# unit vector perpendicular to the line, pointing from the approach side to the far side
+NORMAL = np.array([D[1], -D[0]]) / np.sqrt(LEN2) * APPROACH_SIDE
+
 
 def within_segment(p):
     t = ((p - A) @ D) / LEN2
     return -0.05 <= t <= 1.05
+
+
+def moving_forward(history):
+    """True if the car has clearly been driving from the approach side toward the far side."""
+    if len(history) < 2:
+        return False
+    m = history[-1] - history[0]
+    fwd = float(m @ NORMAL)
+    mag = float(np.hypot(m[0], m[1]))
+    return mag > 0 and fwd >= MIN_FORWARD and fwd / mag >= MIN_COS
 
 
 def judge(state, since_red, conf):
@@ -80,42 +99,71 @@ line_pts = (tuple(int(v) for v in A), tuple(int(v) for v in B))
 light_poly = np.array(cfg["light"], dtype=np.int32)
 
 prev_side, done, status, events = {}, set(), {}, []
+hist, pending = {}, {}
 counts = Counter()
 flash_text, flash_until = "", 0.0
 start = time.time()
 frames = 0
+
+
+def finalize(tid, kind, note, new_events):
+    """Record a confirmed (or reversed) crossing."""
+    global flash_text, flash_until
+    pd = pending.pop(tid)
+    status[tid] = kind
+    counts[kind] += 1
+    ev = {"time_s": round(pd["t0"], 2), "track_id": tid, "event": kind, "light": pd["state"],
+          "confidence": round(pd["conf"], 2), "note": note, "snapshot": ""}
+    new_events.append(ev)
+    events.append(ev)
+    flash_text, flash_until = f"{kind}  #{tid}", pd["t0"] + CONFIRM_SECONDS + 2.0
+
 
 for idx, frame in enumerate(sv.get_video_frames_generator(video)):
     t = idx / fps
     state, since_red = light.update(frame, t)
     result = model.track(
         frame, persist=True, tracker="bytetrack.yaml",
-        conf=CONF, imgsz=IMGSZ, classes=VEHICLES, verbose=False,
+        conf=CONF, imgsz=IMGSZ, classes=VEHICLES, agnostic_nms=True, verbose=False,
     )[0]
     det = sv.Detections.from_ultralytics(result)
 
-    new_events, boxes = [], []
+    new_events, boxes, cur_side = [], [], {}
     if det.tracker_id is not None and len(det) > 0:
         anchors = det.get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
         for i, tid in enumerate(det.tracker_id):
             tid = int(tid)
-            p = anchors[i]
+            p = np.array(anchors[i], dtype=float)
+            hist.setdefault(tid, deque(maxlen=HIST_FRAMES)).append(p)
             s = side_of(p)
+            cur_side[tid] = s
             prev = prev_side.get(tid)
             if s != 0:
-                prev_side[tid] = s
-            if tid not in done and prev == APPROACH_SIDE and s == -APPROACH_SIDE and within_segment(p):
-                done.add(tid)
-                conf = float(det.confidence[i])
-                kind = judge(state, since_red, conf)
-                status[tid] = kind
-                counts[kind] += 1
-                ev = {"time_s": round(t, 2), "track_id": tid, "event": kind,
-                      "light": state, "confidence": round(conf, 2), "snapshot": ""}
-                new_events.append(ev)
-                events.append(ev)
-                flash_text, flash_until = f"{kind}  #{tid}", t + 2.0
+                crossed = (tid not in done and prev == APPROACH_SIDE
+                           and s == -APPROACH_SIDE and within_segment(p))
+                if crossed and not moving_forward(hist[tid]):
+                    pass  # sideways, backwards or jitter: not a real crossing, keep waiting
+                else:
+                    prev_side[tid] = s
+                    if crossed:
+                        done.add(tid)
+                        conf = float(det.confidence[i])
+                        kind = judge(state, since_red, conf)
+                        status[tid] = kind
+                        pending[tid] = {"t0": t, "kind": kind, "state": state, "conf": conf}
             boxes.append((det.xyxy[i].astype(int), tid))
+
+    # --- confirm or reverse crossings waiting for the 0.5 s check ---
+    for tid in list(pending):
+        pd = pending[tid]
+        age = t - pd["t0"]
+        s_now = cur_side.get(tid)
+        if s_now == APPROACH_SIDE:
+            finalize(tid, "NEEDS_REVIEW", "returned behind line", new_events)
+        elif s_now == -APPROACH_SIDE and age >= CONFIRM_SECONDS:
+            finalize(tid, pd["kind"], "", new_events)
+        elif s_now is None and age >= LOST_SECONDS:
+            finalize(tid, pd["kind"], "track lost after crossing", new_events)
 
     # --- draw ---
     out = frame.copy()
@@ -139,19 +187,25 @@ for idx, frame in enumerate(sv.get_video_frames_generator(video)):
     writer.write(out)
     frames += 1
 
+# crossings still waiting when the clip ends: keep their verdict
+for tid in list(pending):
+    finalize(tid, pending[tid]["kind"], "clip ended", [])
+
 writer.release()
 elapsed = time.time() - start
 
+events.sort(key=lambda e: e["time_s"])
 csv_path = f"outputs/{name}_events.csv"
 with open(csv_path, "w", newline="") as f:
-    w = csv.DictWriter(f, fieldnames=["time_s", "track_id", "event", "light", "confidence", "snapshot"])
+    w = csv.DictWriter(f, fieldnames=["time_s", "track_id", "event", "light", "confidence", "note", "snapshot"])
     w.writeheader()
     w.writerows(events)
 
 print(f"Clip: {video} ({frames} frames, {fps:.0f} FPS source)")
 print("Events (first crossing of each car):")
 for ev in events:
-    print(f"  {ev['time_s']:6.2f}s  car #{ev['track_id']:<4} {ev['event']:<13} light={ev['light']:<8} conf={ev['confidence']}")
+    note = f"  [{ev['note']}]" if ev["note"] else ""
+    print(f"  {ev['time_s']:6.2f}s  car #{ev['track_id']:<4} {ev['event']:<13} light={ev['light']:<8} conf={ev['confidence']}{note}")
 print(f"Totals: {dict(counts)}")
 if counts["VIOLATION"] >= HIGH_RISK_THRESHOLD:
     print("INTERSECTION FLAGGED: HIGH-RISK")
