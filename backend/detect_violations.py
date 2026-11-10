@@ -22,9 +22,8 @@ HIGH_RISK_THRESHOLD = 3       # violations per clip that flag the intersection
 
 HIST_FRAMES = 8               # frames of motion used to check driving direction
 MIN_FORWARD = 4.0             # px a car must move toward the far side of the line
-MIN_COS = 0.5                 # motion must point within ~60 deg of the approach direction
-CONFIRM_SECONDS = 0.5         # car must stay beyond the line this long to be confirmed
-LOST_SECONDS = 1.5            # if the track vanishes after crossing, confirm after this
+MIN_COS = 0.2                 # motion must point within ~78 deg of the approach direction (roads run diagonally in the image)
+REVERSE_SECONDS = 1.5         # a car that returns behind the line within this time is downgraded
 
 COLORS = {  # BGR
     "VIOLATION": (0, 0, 255),
@@ -42,6 +41,9 @@ Path("outputs/violations").mkdir(parents=True, exist_ok=True)
 info = sv.VideoInfo.from_video_path(video)
 fps = info.fps
 
+# which point of each car's box is tracked against the stop line (bottom = rear of a car driving away)
+ANCHORS = {"bottom": sv.Position.BOTTOM_CENTER, "center": sv.Position.CENTER, "top": sv.Position.TOP_CENTER}
+ANCHOR = sys.argv[2] if len(sys.argv) > 2 else cfg.get("anchor", "bottom")
 # --- stop line geometry -----------------------------------------------------
 A = np.array(cfg["line"][0], dtype=float)
 B = np.array(cfg["line"][1], dtype=float)
@@ -106,17 +108,32 @@ start = time.time()
 frames = 0
 
 
-def finalize(tid, kind, note, new_events):
-    """Record a confirmed (or reversed) crossing."""
+def record(tid, kind, state, conf, t, new_events):
+    """Record a crossing immediately, so the label, counter and snapshot appear at once."""
     global flash_text, flash_until
-    pd = pending.pop(tid)
     status[tid] = kind
     counts[kind] += 1
-    ev = {"time_s": round(pd["t0"], 2), "track_id": tid, "event": kind, "light": pd["state"],
-          "confidence": round(pd["conf"], 2), "note": note, "snapshot": ""}
+    ev = {"time_s": round(t, 2), "track_id": tid, "event": kind, "light": state,
+          "confidence": round(conf, 2), "note": "", "snapshot": ""}
     new_events.append(ev)
     events.append(ev)
-    flash_text, flash_until = f"{kind}  #{tid}", pd["t0"] + CONFIRM_SECONDS + 2.0
+    flash_text, flash_until = f"{kind}  #{tid}", t + 2.0
+    return ev
+
+
+def reverse(tid, ev):
+    """The car came back behind the line: downgrade the verdict to NEEDS_REVIEW."""
+    global flash_text
+    counts[ev["event"]] -= 1
+    counts["NEEDS_REVIEW"] += 1
+    old_snap = ev["snapshot"]
+    ev["event"], ev["note"] = "NEEDS_REVIEW", "returned behind line"
+    status[tid] = "NEEDS_REVIEW"
+    flash_text = f"NEEDS_REVIEW  #{tid}"
+    if old_snap and Path(old_snap).exists():
+        new_snap = f"outputs/violations/{name}_id{tid}_NEEDS_REVIEW.jpg"
+        Path(old_snap).rename(new_snap)
+        ev["snapshot"] = new_snap
 
 
 for idx, frame in enumerate(sv.get_video_frames_generator(video)):
@@ -130,7 +147,7 @@ for idx, frame in enumerate(sv.get_video_frames_generator(video)):
 
     new_events, boxes, cur_side = [], [], {}
     if det.tracker_id is not None and len(det) > 0:
-        anchors = det.get_anchors_coordinates(sv.Position.BOTTOM_CENTER)
+        anchors = det.get_anchors_coordinates(ANCHORS[ANCHOR])
         for i, tid in enumerate(det.tracker_id):
             tid = int(tid)
             p = np.array(anchors[i], dtype=float)
@@ -149,21 +166,20 @@ for idx, frame in enumerate(sv.get_video_frames_generator(video)):
                         done.add(tid)
                         conf = float(det.confidence[i])
                         kind = judge(state, since_red, conf)
-                        status[tid] = kind
-                        pending[tid] = {"t0": t, "kind": kind, "state": state, "conf": conf}
+                        ev = record(tid, kind, state, conf, t, new_events)
+                        if kind != "LEGAL":
+                            pending[tid] = {"t0": t, "ev": ev}
             boxes.append((det.xyxy[i].astype(int), tid))
 
-    # --- confirm or reverse crossings waiting for the 0.5 s check ---
+    # --- a crossing that is undone within REVERSE_SECONDS becomes NEEDS_REVIEW ---
     for tid in list(pending):
         pd = pending[tid]
         age = t - pd["t0"]
-        s_now = cur_side.get(tid)
-        if s_now == APPROACH_SIDE:
-            finalize(tid, "NEEDS_REVIEW", "returned behind line", new_events)
-        elif s_now == -APPROACH_SIDE and age >= CONFIRM_SECONDS:
-            finalize(tid, pd["kind"], "", new_events)
-        elif s_now is None and age >= LOST_SECONDS:
-            finalize(tid, pd["kind"], "track lost after crossing", new_events)
+        if cur_side.get(tid) == APPROACH_SIDE:
+            reverse(tid, pd["ev"])
+            del pending[tid]
+        elif age >= REVERSE_SECONDS:
+            del pending[tid]          # stayed past the line: verdict stands
 
     # --- draw ---
     out = frame.copy()
@@ -187,10 +203,6 @@ for idx, frame in enumerate(sv.get_video_frames_generator(video)):
     writer.write(out)
     frames += 1
 
-# crossings still waiting when the clip ends: keep their verdict
-for tid in list(pending):
-    finalize(tid, pending[tid]["kind"], "clip ended", [])
-
 writer.release()
 elapsed = time.time() - start
 
@@ -206,7 +218,7 @@ print("Events (first crossing of each car):")
 for ev in events:
     note = f"  [{ev['note']}]" if ev["note"] else ""
     print(f"  {ev['time_s']:6.2f}s  car #{ev['track_id']:<4} {ev['event']:<13} light={ev['light']:<8} conf={ev['confidence']}{note}")
-print(f"Totals: {dict(counts)}")
+print(f"Totals: { {k: v for k, v in counts.items() if v} }")
 if counts["VIOLATION"] >= HIGH_RISK_THRESHOLD:
     print("INTERSECTION FLAGGED: HIGH-RISK")
 print(f"Processing speed: {frames / elapsed:.1f} FPS")
