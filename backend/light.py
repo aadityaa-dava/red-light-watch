@@ -1,4 +1,7 @@
-"""Traffic-light color reader: find lamp blobs (round first), read hue from a thin ring around each."""
+"""Traffic-light color reader: find lamp blobs (round first), read hue from a thin ring around each.
+
+Only the light polygon's bounding box (plus a margin) is processed, not the whole frame.
+"""
 import cv2
 import numpy as np
 from collections import deque, Counter
@@ -10,8 +13,15 @@ def _disk(r):
 
 class LightReader:
     def __init__(self, polygon, width, height, vote_frames=5, min_pixels=10):
-        self.mask = np.zeros((height, width), np.uint8)
-        cv2.fillPoly(self.mask, [np.array(polygon, np.int32)], 255)
+        poly = np.array(polygon, np.int32)
+        # work only on the polygon's bounding box plus a margin (the blur and ring need neighbours)
+        pad = 24
+        self.x0 = max(int(poly[:, 0].min()) - pad, 0)
+        self.y0 = max(int(poly[:, 1].min()) - pad, 0)
+        self.x1 = min(int(poly[:, 0].max()) + pad + 1, width)
+        self.y1 = min(int(poly[:, 1].max()) + pad + 1, height)
+        self.mask = np.zeros((self.y1 - self.y0, self.x1 - self.x0), np.uint8)
+        cv2.fillPoly(self.mask, [poly - np.array([self.x0, self.y0], np.int32)], 255)
         self.min_pixels = min_pixels
         self.votes = deque(maxlen=vote_frames)
         self.state = "unknown"
@@ -43,6 +53,7 @@ class LightReader:
         return keep
 
     def raw_state(self, frame):
+        frame = frame[self.y0:self.y1, self.x0:self.x1]
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
         inside = self.mask > 0

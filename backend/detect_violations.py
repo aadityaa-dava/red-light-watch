@@ -1,5 +1,6 @@
 """Step 6: red-light violation detection (tracking + stop line + light state)."""
 import csv
+import os
 import sys
 import time
 from collections import Counter, deque
@@ -26,6 +27,7 @@ MIN_COS = 0.2                 # motion must point within ~78 deg of the approach
 REVERSE_SECONDS = 1.5         # a car that returns behind the line within this time is downgraded
 DEDUP_SECONDS = 2.0           # a 2nd crossing this soon, overlapping an earlier car, is the same vehicle
 DEDUP_IOU = 0.5               # box overlap above which two tracks count as one vehicle
+SIDE_MARGIN = 10.0            # px a car must be clear of the line to count as being on one side (ignores jitter)
 
 COLORS = {  # BGR
     "VIOLATION": (0, 0, 255),
@@ -57,7 +59,8 @@ ref = np.array(cfg.get("approach_point", (info.width / 2, info.height - 1)), dty
 
 def side_of(p):
     cross = D[0] * (p[1] - A[1]) - D[1] * (p[0] - A[0])
-    return 1 if cross > 0 else (-1 if cross < 0 else 0)
+    margin = SIDE_MARGIN * np.sqrt(LEN2)  # px converted to the units of the cross product
+    return 1 if cross > margin else (-1 if cross < -margin else 0)
 
 
 APPROACH_SIDE = side_of(ref)  # cars start on this side and cross to the other
@@ -104,7 +107,7 @@ def judge(state, since_red, conf):
 
 
 # --- main loop --------------------------------------------------------------
-model = YOLO("yolov8n.pt")
+model = YOLO(os.environ.get("RLW_MODEL", "yolov8n.pt"), task="detect")
 light = LightReader(cfg["light"], info.width, info.height)
 writer = cv2.VideoWriter(
     f"outputs/{name}_violations.mp4", cv2.VideoWriter_fourcc(*"mp4v"), fps, (info.width, info.height)
