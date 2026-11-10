@@ -5,8 +5,6 @@ Runs on an NVIDIA Jetson Orin Nano (8GB) with YOLOv8n and ByteTrack. A
 violation is a tracked vehicle that crosses the stop line while the traffic
 light is stably red.
 
-Course project: Computer Vision + AI.
-
 ## How it works
 
 1. **Detect** vehicles (car, motorcycle, bus, truck) with YOLOv8n.
