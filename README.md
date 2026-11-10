@@ -96,3 +96,7 @@ streamlit run frontend/app.py --server.port 8501 --server.address 0.0.0.0
 ```
 
 Open `http://<jetson-ip>:8501` in a browser (`192.168.55.1` over the USB link).
+
+## Results files
+
+`results/` holds the final run on all 9 clips: `evaluation.csv`, one events CSV per clip, the violation snapshots and the run log (`run_all_final.log`).

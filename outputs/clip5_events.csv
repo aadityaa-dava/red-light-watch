@@ -1,2 +1,0 @@
-time_s,track_id,event,light,confidence,snapshot
-7.72,7,VIOLATION,red,0.89,outputs/violations/clip5_id7_VIOLATION.jpg

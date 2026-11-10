@@ -1,0 +1,10 @@
+clip,real_runners,confirmed_violations,TP,FP,FN,needs_review,late_entry,legal,note
+clip1,1,1,1,0,0,0,0,0,
+clip2,1,1,1,0,0,0,0,0,
+clip3,1,1,1,0,0,0,0,0,
+clip4,1,1,1,0,0,0,0,0,
+clip5,1,1,1,0,0,0,0,0,
+clip6,0,0,0,0,0,0,0,0,"no violation, no events raised"
+clip7,1,1,1,0,0,0,0,0,
+clip8,0,0,0,0,0,0,0,7,"green light, all legal"
+clip9,1,1,1,0,0,0,0,0,red-light runner caught

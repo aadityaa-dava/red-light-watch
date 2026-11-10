@@ -1,0 +1,8 @@
+time_s,track_id,event,light,confidence,note,snapshot
+0.56,2,LEGAL,green,0.7,,
+1.1,28,LEGAL,green,0.55,,
+1.39,11,LEGAL,green,0.52,,
+1.39,37,LEGAL,green,0.59,,
+2.29,49,LEGAL,green,0.81,,
+2.72,47,LEGAL,green,0.9,,
+3.19,40,LEGAL,green,0.75,,
