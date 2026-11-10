@@ -1,5 +1,6 @@
 """Step 6: red-light violation detection (tracking + stop line + light state)."""
 import csv
+import json
 import os
 import queue
 import sys
@@ -40,7 +41,7 @@ COLORS = {  # BGR
 }
 
 name = sys.argv[1] if len(sys.argv) > 1 else "clip1"
-cfg = CLIPS[name]
+cfg = CLIPS[name] if name in CLIPS else json.load(open(f"data/clips/{name}.json"))
 video = f"data/clips/{name}.mp4"
 Path("outputs/violations").mkdir(parents=True, exist_ok=True)
 

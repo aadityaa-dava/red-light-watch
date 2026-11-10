@@ -87,4 +87,12 @@ The 15 FPS target was not reached; speed is still real-time for the 1080p source
 
 ## Frontend
 
-A Streamlit interface (upload a video, set the line and light region, view results, download the CSV) is in progress.
+A Streamlit dashboard runs the detector on a sample clip or on an uploaded video. For an upload you mark the stop line and the traffic light on a preview frame, then press Run detection. It shows the violation counters, the annotated video, the events table, the violation snapshots and a CSV download.
+
+```bash
+apt-get update && apt-get install -y ffmpeg      # needed to play the annotated video in the browser
+pip install streamlit
+streamlit run frontend/app.py --server.port 8501 --server.address 0.0.0.0
+```
+
+Open `http://<jetson-ip>:8501` in a browser (`192.168.55.1` over the USB link).
