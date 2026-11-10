@@ -24,6 +24,8 @@ HIST_FRAMES = 8               # frames of motion used to check driving direction
 MIN_FORWARD = 4.0             # px a car must move toward the far side of the line
 MIN_COS = 0.2                 # motion must point within ~78 deg of the approach direction (roads run diagonally in the image)
 REVERSE_SECONDS = 1.5         # a car that returns behind the line within this time is downgraded
+DEDUP_SECONDS = 2.0           # a 2nd crossing this soon, overlapping an earlier car, is the same vehicle
+DEDUP_IOU = 0.5               # box overlap above which two tracks count as one vehicle
 
 COLORS = {  # BGR
     "VIOLATION": (0, 0, 255),
@@ -44,6 +46,7 @@ fps = info.fps
 # which point of each car's box is tracked against the stop line (bottom = rear of a car driving away)
 ANCHORS = {"bottom": sv.Position.BOTTOM_CENTER, "center": sv.Position.CENTER, "top": sv.Position.TOP_CENTER}
 ANCHOR = sys.argv[2] if len(sys.argv) > 2 else cfg.get("anchor", "bottom")
+
 # --- stop line geometry -----------------------------------------------------
 A = np.array(cfg["line"][0], dtype=float)
 B = np.array(cfg["line"][1], dtype=float)
@@ -78,6 +81,15 @@ def moving_forward(history):
     return mag > 0 and fwd >= MIN_FORWARD and fwd / mag >= MIN_COS
 
 
+def iou(a, b):
+    """Intersection-over-union of two xyxy boxes."""
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
 def judge(state, since_red, conf):
     if state == "green":
         return "LEGAL"
@@ -101,7 +113,7 @@ line_pts = (tuple(int(v) for v in A), tuple(int(v) for v in B))
 light_poly = np.array(cfg["light"], dtype=np.int32)
 
 prev_side, done, status, events = {}, set(), {}, []
-hist, pending = {}, {}
+hist, pending, last_box = {}, {}, {}
 counts = Counter()
 flash_text, flash_until = "", 0.0
 start = time.time()
@@ -154,6 +166,7 @@ for idx, frame in enumerate(sv.get_video_frames_generator(video)):
             hist.setdefault(tid, deque(maxlen=HIST_FRAMES)).append(p)
             s = side_of(p)
             cur_side[tid] = s
+            last_box[tid] = det.xyxy[i]
             prev = prev_side.get(tid)
             if s != 0:
                 crossed = (tid not in done and prev == APPROACH_SIDE
@@ -164,11 +177,19 @@ for idx, frame in enumerate(sv.get_video_frames_generator(video)):
                     prev_side[tid] = s
                     if crossed:
                         done.add(tid)
-                        conf = float(det.confidence[i])
-                        kind = judge(state, since_red, conf)
-                        ev = record(tid, kind, state, conf, t, new_events)
-                        if kind != "LEGAL":
-                            pending[tid] = {"t0": t, "ev": ev}
+                        # same vehicle under a second track id? (recent event + heavily overlapping box)
+                        duplicate = any(
+                            e["track_id"] != tid and t - e["time_s"] <= DEDUP_SECONDS
+                            and e["track_id"] in last_box
+                            and iou(det.xyxy[i], last_box[e["track_id"]]) > DEDUP_IOU
+                            for e in events if e["event"] != "LEGAL"
+                        )
+                        if not duplicate:
+                            conf = float(det.confidence[i])
+                            kind = judge(state, since_red, conf)
+                            ev = record(tid, kind, state, conf, t, new_events)
+                            if kind != "LEGAL":
+                                pending[tid] = {"t0": t, "ev": ev}
             boxes.append((det.xyxy[i].astype(int), tid))
 
     # --- a crossing that is undone within REVERSE_SECONDS becomes NEEDS_REVIEW ---
