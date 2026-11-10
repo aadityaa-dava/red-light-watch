@@ -91,7 +91,7 @@ A Streamlit dashboard runs the detector on a sample clip or on an uploaded video
 
 ```bash
 apt-get update && apt-get install -y ffmpeg      # needed to play the annotated video in the browser
-pip install streamlit
+pip install streamlit streamlit-image-coordinates
 streamlit run frontend/app.py --server.port 8501 --server.address 0.0.0.0
 ```
 

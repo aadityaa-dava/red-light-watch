@@ -11,6 +11,11 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+try:
+    from streamlit_image_coordinates import streamlit_image_coordinates
+except ImportError:           # without the package the user types the coordinates instead of clicking
+    streamlit_image_coordinates = None
+
 ROOT = Path(__file__).resolve().parent.parent       # repo root (detect_violations.py expects to run here)
 sys.path.insert(0, str(ROOT / "backend"))
 from config import CLIPS  # noqa: E402
@@ -61,12 +66,16 @@ def first_frame(path, t):
     return (frame if ok else None), fps, n
 
 
-def draw_setup(frame, line, light):
+def draw_setup(frame, line, light, points=()):
     img = frame.copy()
-    cv2.line(img, line[0], line[1], (255, 255, 0), 4)
-    cv2.polylines(img, [np.array(light, np.int32)], True, (0, 215, 255), 4)
-    cv2.putText(img, "stop line", (line[0][0], max(line[0][1] - 12, 20)), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 0), 2)
-    cv2.putText(img, "traffic light", (light[0][0], max(light[0][1] - 12, 20)), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 215, 255), 2)
+    th = max(2, frame.shape[1] // 400)
+    fs = max(0.7, frame.shape[1] / 1600)
+    cv2.line(img, line[0], line[1], (255, 255, 0), th)
+    cv2.polylines(img, [np.array(light, np.int32)], True, (0, 215, 255), th)
+    cv2.putText(img, "stop line", (line[0][0], max(line[0][1] - 12, 20)), cv2.FONT_HERSHEY_SIMPLEX, fs, (255, 255, 0), th)
+    cv2.putText(img, "traffic light", (light[0][0], max(light[0][1] - 12, 20)), cv2.FONT_HERSHEY_SIMPLEX, fs, (0, 215, 255), th)
+    for p in points:                                   # the points just clicked
+        cv2.circle(img, p, max(6, frame.shape[1] // 160), (0, 0, 255), -1)
     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
 
@@ -109,26 +118,70 @@ if source == "Upload video":
     frame, _, _ = first_frame(video_path, t_show)
 
     k = vid_id
-    a, b = st.columns(2)
-    with a:
-        st.markdown("**Stop line** (draw it left to right, across the lane(s))")
-        l1, l2, l3, l4 = st.columns(4)
-        lx1 = l1.number_input("x1", 0, W, int(W * 0.2), key=f"{k}_lx1")
-        ly1 = l2.number_input("y1", 0, H, int(H * 0.7), key=f"{k}_ly1")
-        lx2 = l3.number_input("x2", 0, W, int(W * 0.8), key=f"{k}_lx2")
-        ly2 = l4.number_input("y2", 0, H, int(H * 0.7), key=f"{k}_ly2")
-    with b:
-        st.markdown("**Traffic light** (a box around the lamps)")
-        t1, t2, t3, t4 = st.columns(4)
-        tx1 = t1.number_input("left", 0, W, int(W * 0.45), key=f"{k}_tx1")
-        ty1 = t2.number_input("top", 0, H, int(H * 0.05), key=f"{k}_ty1")
-        tx2 = t3.number_input("right", 0, W, int(W * 0.55), key=f"{k}_tx2")
-        ty2 = t4.number_input("bottom", 0, H, int(H * 0.15), key=f"{k}_ty2")
+    names = ("lx1", "ly1", "lx2", "ly2", "tx1", "ty1", "tx2", "ty2")
+    defaults = (int(W * 0.2), int(H * 0.7), int(W * 0.8), int(H * 0.7),
+                int(W * 0.45), int(H * 0.05), int(W * 0.55), int(H * 0.15))
+    key = {n: f"{k}_{n}" for n in names}
+    for n, d in zip(names, defaults):
+        st.session_state.setdefault(key[n], d)
+    val = {n: int(st.session_state[key[n]]) for n in names}
+
+    target = st.radio("Click on the picture to mark:", ["Stop line", "Traffic light"], horizontal=True, key=f"{k}_target")
+    pts = st.session_state.setdefault(f"{k}_pts", {"Stop line": [], "Traffic light": []})
+    done = len(pts[target]) % 2 == 0 and len(pts[target]) > 0
+    if target == "Stop line":
+        hint = "Marked. Click again to redo it." if done else ("Now click the OTHER END of the stop line." if pts[target] else "Click one END of the stop line (where cars must stop).")
+    else:
+        hint = "Marked. Click again to redo it." if done else ("Now click the OPPOSITE corner of the light." if pts[target] else "Click one CORNER of a box around the traffic light lamps.")
+    st.info(hint)
+
+    line = [(val["lx1"], val["ly1"]), (val["lx2"], val["ly2"])]
+    light_poly = [(val["tx1"], val["ty1"]), (val["tx2"], val["ty1"]), (val["tx2"], val["ty2"]), (val["tx1"], val["ty2"])]
+    marks = [tuple(p) for lst in pts.values() for p in lst]
+    preview = draw_setup(frame, line, light_poly, marks)
+
+    if streamlit_image_coordinates is not None:
+        click = streamlit_image_coordinates(preview, width=min(W, 1100), key=f"{k}_img")
+        if click and click.get("unix_time") != st.session_state.get(f"{k}_last"):
+            st.session_state[f"{k}_last"] = click["unix_time"]
+            scale = W / click["width"]                       # the picture is shown smaller than the video
+            px = min(max(int(round(click["x"] * scale)), 0), W)
+            py = min(max(int(round(click["y"] * scale)), 0), H)
+            lst = pts[target]
+            if len(lst) >= 2:
+                lst.clear()
+            lst.append((px, py))
+            if target == "Stop line":
+                st.session_state[key["lx1" if len(lst) == 1 else "lx2"]] = px
+                st.session_state[key["ly1" if len(lst) == 1 else "ly2"]] = py
+            elif len(lst) == 2:
+                st.session_state[key["tx1"]], st.session_state[key["tx2"]] = sorted((lst[0][0], lst[1][0]))
+                st.session_state[key["ty1"]], st.session_state[key["ty2"]] = sorted((lst[0][1], lst[1][1]))
+            st.rerun()
+    else:
+        st.image(preview, width="stretch")
+        st.warning("Clicking needs the package streamlit-image-coordinates (pip install streamlit-image-coordinates). Type the numbers below instead.")
+    st.caption(f"Preview at {t_show:.1f}s ({W}x{H}). Use the slider above to find a frame where the light is visible. "
+               "Cars should drive from the bottom of the picture toward the top, across the line.")
+
+    with st.expander("Coordinates (fine-tune by typing)"):
+        a, b = st.columns(2)
+        with a:
+            st.markdown("**Stop line**")
+            l1, l2, l3, l4 = st.columns(4)
+            lx1 = l1.number_input("x1", min_value=0, max_value=W, key=key["lx1"])
+            ly1 = l2.number_input("y1", min_value=0, max_value=H, key=key["ly1"])
+            lx2 = l3.number_input("x2", min_value=0, max_value=W, key=key["lx2"])
+            ly2 = l4.number_input("y2", min_value=0, max_value=H, key=key["ly2"])
+        with b:
+            st.markdown("**Traffic light**")
+            t1, t2, t3, t4 = st.columns(4)
+            tx1 = t1.number_input("left", min_value=0, max_value=W, key=key["tx1"])
+            ty1 = t2.number_input("top", min_value=0, max_value=H, key=key["ty1"])
+            tx2 = t3.number_input("right", min_value=0, max_value=W, key=key["tx2"])
+            ty2 = t4.number_input("bottom", min_value=0, max_value=H, key=key["ty2"])
     line = [(int(lx1), int(ly1)), (int(lx2), int(ly2))]
     light_poly = [(int(tx1), int(ty1)), (int(tx2), int(ty1)), (int(tx2), int(ty2)), (int(tx1), int(ty2))]
-    st.image(draw_setup(frame, line, light_poly), caption=f"Preview at {t_show:.1f}s ({W}x{H})", width="stretch")
-    st.caption("Cars should drive from the bottom of the picture toward the top, across the line. "
-               "Press **Run detection** in the sidebar when the line and the light box look right.")
     setup_ok = (lx1, ly1) != (lx2, ly2) and tx1 < tx2 and ty1 < ty2
     if not setup_ok:
         st.warning("The stop line needs two different points, and the light box needs right > left and bottom > top.")

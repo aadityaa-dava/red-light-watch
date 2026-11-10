@@ -7,3 +7,4 @@ pandas
 matplotlib
 streamlit
 lap>=0.5.12
+streamlit-image-coordinates
