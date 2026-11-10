@@ -1,7 +1,9 @@
 """Step 6: red-light violation detection (tracking + stop line + light state)."""
 import csv
 import os
+import queue
 import sys
+import threading
 import time
 from collections import Counter, deque
 from pathlib import Path
@@ -17,7 +19,7 @@ from light import LightReader
 VEHICLES = [2, 3, 5, 7]       # COCO: car, motorcycle, bus, truck
 CONF = 0.35                   # ignore detections below this
 CONF_CONFIRM = 0.5            # below this, a crossing goes to NEEDS_REVIEW
-IMGSZ = 1280                  # larger input helps with small night-time cars
+IMGSZ = int(os.environ.get("RLW_IMGSZ", "1280"))                  # larger input helps with small night-time cars
 GRACE_SECONDS = 1.0           # crossing this soon after red is a late entry
 HIGH_RISK_THRESHOLD = 3       # violations per clip that flag the intersection
 
@@ -112,6 +114,23 @@ light = LightReader(cfg["light"], info.width, info.height)
 writer = cv2.VideoWriter(
     f"outputs/{name}_violations.mp4", cv2.VideoWriter_fourcc(*"mp4v"), fps, (info.width, info.height)
 )
+# Encoding 1080p video is slow, so a second thread writes frames while the main thread keeps detecting.
+# Set RLW_NOVIDEO=1 to skip the annotated video entirely (fastest; events and snapshots are still saved).
+WRITE_VIDEO = os.environ.get("RLW_NOVIDEO") != "1"
+frame_q = queue.Queue(maxsize=16)
+
+
+def _writer_loop():
+    while True:
+        item = frame_q.get()
+        if item is None:
+            break
+        writer.write(item)
+
+
+writer_thread = threading.Thread(target=_writer_loop, daemon=True)
+if WRITE_VIDEO:
+    writer_thread.start()
 line_pts = (tuple(int(v) for v in A), tuple(int(v) for v in B))
 light_poly = np.array(cfg["light"], dtype=np.int32)
 
@@ -224,9 +243,13 @@ for idx, frame in enumerate(sv.get_video_frames_generator(video)):
             path = f"outputs/violations/{name}_id{ev['track_id']}_{ev['event']}.jpg"
             cv2.imwrite(path, out)
             ev["snapshot"] = path
-    writer.write(out)
+    if WRITE_VIDEO:
+        frame_q.put(out)
     frames += 1
 
+if WRITE_VIDEO:
+    frame_q.put(None)
+    writer_thread.join()   # wait until every frame is on disk
 writer.release()
 elapsed = time.time() - start
 

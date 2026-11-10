@@ -16,9 +16,9 @@ GROUND_TRUTH = {
     "clip6": 0, "clip7": 1, "clip8": 0, "clip9": 1,
 }
 NOTES = {
-    "clip6": "cross-traffic car flagged for review (acceptable)",
+    "clip6": "no violation, no events raised",
     "clip8": "green light, all legal",
-    "clip9": "one low-confidence car sent to review",
+    "clip9": "red-light runner caught",
 }
 
 rows, tp_all, fp_all, fn_all = [], 0, 0, 0
