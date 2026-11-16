@@ -1,0 +1,42 @@
+== clip1
+    7.51s  car #14   VIOLATION     light=red      conf=0.89
+Totals: {'VIOLATION': 1}
+Processing speed: 9.1 FPS
+== clip2
+    5.84s  car #32   VIOLATION     light=red      conf=0.8
+Totals: {'VIOLATION': 1}
+Processing speed: 8.1 FPS
+== clip3
+    6.17s  car #27   VIOLATION     light=red      conf=0.91
+Totals: {'VIOLATION': 1}
+Processing speed: 7.8 FPS
+== clip4
+    4.67s  car #40   VIOLATION     light=red      conf=0.94
+Totals: {'VIOLATION': 1}
+Processing speed: 7.7 FPS
+== clip5
+    7.88s  car #7    VIOLATION     light=red      conf=0.62
+Totals: {'VIOLATION': 1}
+Processing speed: 8.1 FPS
+== clip6
+Totals: {}
+Processing speed: 8.6 FPS
+== clip7
+    0.57s  car #1    VIOLATION     light=red      conf=0.93
+Totals: {'VIOLATION': 1}
+Processing speed: 7.8 FPS
+== clip8
+    0.50s  car #24   LEGAL         light=green    conf=0.45
+    0.56s  car #1    LEGAL         light=green    conf=0.82
+    1.10s  car #30   LEGAL         light=green    conf=0.75
+    1.39s  car #39   LEGAL         light=green    conf=0.67
+    1.39s  car #16   LEGAL         light=green    conf=0.67
+    2.29s  car #54   LEGAL         light=green    conf=0.86
+    2.72s  car #52   LEGAL         light=green    conf=0.89
+    3.19s  car #42   LEGAL         light=green    conf=0.77
+Totals: {'LEGAL': 8}
+Processing speed: 7.2 FPS
+== clip9
+    0.83s  car #3    VIOLATION     light=red      conf=0.91
+Totals: {'VIOLATION': 1}
+Processing speed: 7.4 FPS
