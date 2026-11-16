@@ -28,6 +28,10 @@ Each GIF is the annotated output of the detector (light colour, vehicle boxes, c
 | <img src="docs/gifs/clip2.gif" width="210"><br>**clip2**: VIOLATION, car #27 at 5.84 s | <img src="docs/gifs/clip3.gif" width="210"><br>**clip3**: VIOLATION, car #18 at 6.17 s | <img src="docs/gifs/clip4.gif" width="210"><br>**clip4**: VIOLATION, car #32 at 4.67 s | <img src="docs/gifs/clip5.gif" width="210"><br>**clip5**: VIOLATION, car #2 at 7.88 s |
 | <img src="docs/gifs/clip6.gif" width="210"><br>**clip6**: no violation | <img src="docs/gifs/clip7.gif" width="210"><br>**clip7**: VIOLATION, car #1 at 0.57 s | <img src="docs/gifs/clip8.gif" width="210"><br>**clip8**: green light, 7 legal crossings | <img src="docs/gifs/clip9.gif" width="210"><br>**clip9**: VIOLATION, car #3 at 0.83 s |
 
+### Full annotated videos
+
+The complete annotated output for each clip (click to play on GitHub): [clip1](docs/videos/clip1_annotated.mp4) · [clip2](docs/videos/clip2_annotated.mp4) · [clip3](docs/videos/clip3_annotated.mp4) · [clip4](docs/videos/clip4_annotated.mp4) · [clip5](docs/videos/clip5_annotated.mp4) · [clip6](docs/videos/clip6_annotated.mp4) · [clip7](docs/videos/clip7_annotated.mp4) · [clip8](docs/videos/clip8_annotated.mp4) · [clip9](docs/videos/clip9_annotated.mp4)
+
 ## What the detector sees
 
 The plot shows the traffic-light colour the detector read in each clip, with every car that crossed the stop line marked on it. Every violation (black X) falls inside a red phase; every legal crossing (white circle) falls inside a green phase.
